@@ -34,3 +34,12 @@ class TestJobScheduler(TestCase):
             [2]
         ]
         assert result == expected
+
+    def test_janela_de_tempo_invalida(self):
+        self.assertRaises(
+            ValueError,
+            schedule,
+            self.jobs,
+            inicio='2019-11-11 12:00:00',
+            fim='2019-11-10 09:00:00'
+        )
