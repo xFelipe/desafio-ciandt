@@ -55,5 +55,5 @@ def schedule(jobs, inicio: str, fim: str):
     conjunto = []
     for job in jobs_priorizados:
         _adicionar_job_ao_conjunto(job, conjunto, datetime_inicio, datetime_fim)
-    
-    print(conjunto)
+
+    return [[job['ID'] for job in array] for array in conjunto]
