@@ -3,6 +3,15 @@ from datetime import datetime, timedelta
 FORMATO_DE_DATA_E_HORA = '%Y-%m-%d %H:%M:%S'
 TEMPO_MAXIMO_POR_ARRAY_DE_JOBS = timedelta(hours=8)
 
+class JanelaTempoNegativaError(ValueError): pass
+class TempoMaximoPorJobExcedidoError(ValueError): pass
+class PrazoInsuficienteError(ValueError): pass
+class PrazoJobInsuficienteError(ValueError): pass
+
+
+def _string_para_datetime(data: str) -> datetime:
+    return datetime.strptime(data, FORMATO_DE_DATA_E_HORA)
+
 
 def _tempo_total(jobs: list) -> timedelta:
     if not jobs:
@@ -13,21 +22,49 @@ def _tempo_total(jobs: list) -> timedelta:
     )
 
 
-def _adicionar_job_ao_conjunto(job: dict, conjunto: list,
-                               inicio: datetime, prazo: datetime):
-    """Adiciona jobs ao menor array do conjunto. Caso não caiba ou não exista
-    um array, adiciona um array vazio ao conjunto antes.
+def _validar_job(job:dict , inicio: datetime, prazo: datetime):
+    """Levanta exceção caso exista algum problema com o job de acordo com
+    o inicio de execução e o prazo.
     """
     tempo_job = timedelta(seconds=job['Tempo estimado'])
+    prazo_job = _string_para_datetime(job['Data Máxima de conclusão'])
+    if tempo_job > TEMPO_MAXIMO_POR_ARRAY_DE_JOBS:
+        raise TempoMaximoPorJobExcedidoError(
+            f'Job {job["ID"]} - ({tempo_job}) excede o '
+            f'tempo máximo de {TEMPO_MAXIMO_POR_ARRAY_DE_JOBS}.'
+        )
+
+    if inicio + tempo_job > prazo:
+        raise PrazoInsuficienteError(
+            f'Janela de tempo de execução ({prazo-inicio}) é insuficiente '
+            f'para execução do job {job["ID"]} ({tempo_job}).'
+        )
+
+    if inicio + tempo_job > prazo_job:
+        raise PrazoJobInsuficienteError(
+            f'O prazo de execução({prazo_job}) do job {job["ID"]} é'
+            f'insuficiente para sua janela de tempo de execução ({tempo_job}) '
+            f'ao iniciar execução no momento ({inicio}).'
+        )
+
+
+def _adicionar_job_ao_conjunto(job: dict, conjunto: list,
+                               inicio: datetime, prazo: datetime):
+    """Valida e diciona jobs ao menor array do conjunto. Caso não caiba ou não
+    exista um array, adiciona um array vazio ao conjunto antes.
+    """
+    tempo_job = timedelta(seconds=job['Tempo estimado'])
+    prazo_job = _string_para_datetime(job['Data Máxima de conclusão'])
+
+    _validar_job(job, inicio, prazo)
+
     menor_array = min(conjunto, key=_tempo_total) if conjunto else None
     tempo_menor_array = _tempo_total(menor_array)
     novo_array_e_necessario: bool = (
         len(conjunto) == 0
         or tempo_menor_array + tempo_job > TEMPO_MAXIMO_POR_ARRAY_DE_JOBS
         or tempo_menor_array + tempo_job + inicio > prazo
-        or tempo_menor_array + tempo_job + inicio > datetime.strptime(
-            job['Data Máxima de conclusão'], FORMATO_DE_DATA_E_HORA
-        )
+        or tempo_menor_array + tempo_job + inicio > prazo_job
     )
     if novo_array_e_necessario:
         menor_array = []
@@ -35,25 +72,24 @@ def _adicionar_job_ao_conjunto(job: dict, conjunto: list,
     menor_array.append(job)
 
 
-def schedule(jobs, inicio: str, fim: str):
-    datetime_inicio = datetime.strptime(inicio, FORMATO_DE_DATA_E_HORA)
-    datetime_fim = datetime.strptime(fim, FORMATO_DE_DATA_E_HORA)
-    janela_de_tempo = datetime_fim - datetime_inicio
-
-    if janela_de_tempo < timedelta(0):
-        raise ValueError(
-            'Não é possível trabalhar com '
-            f'janela de tempo negativa ({janela_de_tempo}).'
-        )
+def schedule(jobs: list, inicio: str, fim: str):
+    """Ordena o agendamento de jobs de acordo com o tempo de execução inicial, 
+    com o prazo geral e o prazo de cada job e retorna os id's dos jobs em 
+    arrays ordenados ou retorna erro caso não seja possível executar algum
+    job de acordo com os prazos.
+    """
     jobs_priorizados = sorted(
         jobs,
-        key=lambda job: datetime.strptime(
-            job['Data Máxima de conclusão'], FORMATO_DE_DATA_E_HORA
-        )
+        key=lambda job: _string_para_datetime(job['Data Máxima de conclusão'])
     )
 
     conjunto = []
     for job in jobs_priorizados:
-        _adicionar_job_ao_conjunto(job, conjunto, datetime_inicio, datetime_fim)
+        _adicionar_job_ao_conjunto(
+            job,
+            conjunto, 
+            inicio=_string_para_datetime(inicio),
+            prazo=_string_para_datetime(fim)
+        )
 
     return [[job['ID'] for job in array] for array in conjunto]
